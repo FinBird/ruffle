@@ -33,7 +33,6 @@ package flash.display {
         public native function get sameDomain():Boolean;
         public native function get childAllowsParent():Boolean;
 
-        [API("667")]
         public native function get uncaughtErrorEvents():UncaughtErrorEvents;
 
         override public function dispatchEvent(event:Event):Boolean {
