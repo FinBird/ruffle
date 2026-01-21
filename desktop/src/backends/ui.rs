@@ -298,7 +298,29 @@ impl UiBackend for DesktopUiBackend {
         let is_bold = query.is_bold;
         let is_italic = query.is_italic;
 
+        let mut families = vec![Family::Name(name)];
+
+        match name.as_str() {
+            "宋体" => {
+                families.push(Family::Name("SimSun"));
+                families.push(Family::Name("Songti SC"));
+                families.push(Family::Serif);
+            }
+            "DFPHaiBaoW12-GB" => {
+                families.push(Family::Name("Microsoft YaHei"));
+                families.push(Family::Name("SimHei"));
+                families.push(Family::SansSerif);
+            }
+            "FZCuYuan-M03S" => {
+                families.push(Family::Name("Microsoft YaHei"));
+                families.push(Family::Name("SimHei"));
+                families.push(Family::SansSerif);
+            }
+            _ => {}
+        }
+
         let query = fontdb::Query {
+            families: families.as_slice(),
             families: &[Family::Name(name)],
             weight: if is_bold {
                 fontdb::Weight::BOLD
@@ -322,7 +344,7 @@ impl UiBackend for DesktopUiBackend {
                 face.post_script_name
             );
 
-            match load_fontdb_font(name.to_string(), face) {
+            match load_fontdb_font(name.to_string(), face, is_bold, is_italic) {
                 Ok(font_definition) => register(font_definition),
                 Err(error) => tracing::error!("Error loading font from fontdb: {error}"),
             }
@@ -419,10 +441,12 @@ fn load_font_from_file(
     })
 }
 
-fn load_fontdb_font(name: String, face: &FaceInfo) -> Result<FontDefinition<'static>> {
-    let is_bold = face.weight > fontdb::Weight::NORMAL;
-    let is_italic = face.style != fontdb::Style::Normal;
-
+fn load_fontdb_font(
+    name: String,
+    face: &FaceInfo,
+    is_bold: bool,
+    is_italic: bool,
+) -> Result<FontDefinition<'static>> {
     match &face.source {
         fontdb::Source::File(path) => {
             load_font_from_file(path, name, face.index, is_bold, is_italic)
