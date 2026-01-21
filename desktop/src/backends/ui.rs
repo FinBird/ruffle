@@ -320,7 +320,6 @@ impl UiBackend for DesktopUiBackend {
         }
 
         let query = fontdb::Query {
-            families: families.as_slice(),
             families: &[Family::Name(name)],
             weight: if is_bold {
                 fontdb::Weight::BOLD
