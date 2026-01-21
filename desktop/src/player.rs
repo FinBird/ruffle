@@ -219,7 +219,7 @@ impl ActivePlayer {
             opt.proxy.clone(),
             opt.player.upgrade_to_https.unwrap_or_default(),
             opt.socket_allowed.clone(),
-            opt.tcp_connections.unwrap_or(SocketMode::Ask),
+            opt.tcp_connections.unwrap_or(SocketMode::Allow),
             Rc::new(content),
             DesktopNavigatorInterface::new(
                 preferences.clone(),
@@ -328,10 +328,10 @@ impl ActivePlayer {
                 opt.player.force_scale.unwrap_or_default(),
             )
             .with_fullscreen(opt.fullscreen)
-            .with_load_behavior(opt.player.load_behavior.unwrap_or(LoadBehavior::Streaming))
+            .with_load_behavior(opt.player.load_behavior.unwrap_or(LoadBehavior::Blocking))
             .with_spoofed_url(opt.player.spoof_url.clone().map(|url| url.to_string()))
             .with_page_url(opt.player.spoof_url.clone().map(|url| url.to_string()))
-            .with_player_version(opt.player.player_version)
+            .with_player_version(opt.player.player_version.or(Some(51)))
             .with_player_runtime(opt.player.player_runtime.unwrap_or_default())
             .with_frame_rate(opt.player.frame_rate)
             .with_avm2_optimizer_enabled(opt.avm2_optimizer_enabled);
@@ -363,6 +363,9 @@ impl ActivePlayer {
                     "Tinos".into(),
                     "Liberation Serif".into(),
                     "DejaVu Serif".into(),
+                    "SimSun".into(),
+                    "Songti SC".into(),
+                    "Noto Serif CJK SC".into(),
                 ],
             );
             player_lock.set_default_font(
@@ -372,6 +375,12 @@ impl ActivePlayer {
                     "Arimo".into(),
                     "Liberation Sans".into(),
                     "DejaVu Sans".into(),
+                    "Microsoft YaHei".into(),
+                    "SimHei".into(),
+                    "PingFang SC".into(),
+                    "WenQuanYi Zen Hei".into(),
+                    "Noto Sans CJK SC".into(),
+                    "Source Han Sans SC".into(),
                 ],
             );
             player_lock.set_default_font(
@@ -381,6 +390,9 @@ impl ActivePlayer {
                     "Cousine".into(),
                     "Liberation Mono".into(),
                     "DejaVu Sans Mono".into(),
+                    "SimSun".into(),
+                    "Songti SC".into(),
+                    "Noto Serif CJK SC".into(),
                 ],
             );
             player_lock.set_default_font(
@@ -389,6 +401,11 @@ impl ActivePlayer {
                     "ヒラギノ角ゴ Pro W3".into(), // Mac with Japanese environment
                     "MS UI Gothic".into(),        // Windows
                     "Noto Sans CJK JP".into(),    // Linux
+                    "Microsoft YaHei".into(),
+                    "PingFang SC".into(),
+                    "WenQuanYi Zen Hei".into(),
+                    "Noto Sans CJK SC".into(),
+                    "Source Han Sans SC".into(),
                     "Arial Unicode MS".into(),    // Mac fallback
                 ],
             );
@@ -398,6 +415,11 @@ impl ActivePlayer {
                     "Osaka－等幅".into(),      // Mac with Japanese environment
                     "MS Gothic".into(),        // Windows
                     "Noto Sans CJK JP".into(), // Linux
+                    "Microsoft YaHei".into(),
+                    "PingFang SC".into(),
+                    "WenQuanYi Zen Hei".into(),
+                    "Noto Sans CJK SC".into(),
+                    "Source Han Sans SC".into(),
                     "Arial Unicode MS".into(), // Mac fallback
                 ],
             );
@@ -407,6 +429,9 @@ impl ActivePlayer {
                     "ヒラギノ明朝 Pro W3".into(), // Mac with Japanese environment
                     "MS PMincho".into(),          // Windows
                     "Noto Sans CJK JP".into(),    // Linux
+                    "SimSun".into(),
+                    "Songti SC".into(),
+                    "Noto Serif CJK SC".into(),
                     "Arial Unicode MS".into(),    // Mac fallback
                 ],
             );

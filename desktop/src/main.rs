@@ -148,7 +148,7 @@ fn main() -> Result<(), Error> {
     let env_filter = tracing_subscriber::EnvFilter::builder().parse_lossy(
         env::var("RUST_LOG")
             .as_deref()
-            .unwrap_or("warn,ruffle=info,avm_trace=info"),
+            .unwrap_or("Info,ruffle=Info,avm_trace=Info"),
     );
 
     let subscriber = tracing_subscriber::registry()
