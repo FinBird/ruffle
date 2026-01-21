@@ -6,8 +6,8 @@ use crate::avm2::parameters::ParametersExt;
 use crate::avm2::value::Value;
 use crate::avm2::{Error, Object};
 
-/// Native function definition for `URLLoader.load`
-pub fn load<'gc>(
+/// Native function definition for `URLLoader.native_load`
+pub fn native_load<'gc>(
     activation: &mut Activation<'_, 'gc>,
     this: Value<'gc>,
     args: &[Value<'gc>],

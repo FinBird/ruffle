@@ -17,18 +17,9 @@ package flash.net {
     public class URLStream extends EventDispatcher implements IDataInput {
         private var _endian:String = Endian.BIG_ENDIAN;
         private var _connected:Boolean = false;
-
-        // FIXME - we currently implement `URLStream` using a `URLLoader`,
-        // which means that content can't actually be "streamed" (it becomes
-        // available all at once when the entire download finishes).
-        // We should write an actual "streaming" implementation that exposes
-        // content as it comes in over the network, but this will require changes
-        // to `NavigatorBackend`. See https://github.com/ruffle-rs/ruffle/pull/11046
         private var _loader:URLLoader = new URLLoader();
 
         public function URLStream() {
-            stub_constructor("flash.net.URLStream", "streaming support");
-
             this._loader.dataFormat = URLLoaderDataFormat.BINARY;
             var self = this;
 

@@ -1098,123 +1098,229 @@ pub fn load_data_into_url_loader<'gc>(
     request: Request,
 ) -> OwnedFuture<(), Error> {
     let player = uc.player_handle();
-    let target = Avm2ScriptObjectHandle::stash(uc, target);
+    let target_handle = Avm2ScriptObjectHandle::stash(uc, target);
 
     Box::pin(async move {
         let fetch = player
             .lock()
             .unwrap()
             .fetch(request, FetchReason::UrlLoader);
-        let response = wait_for_full_response(fetch).await;
 
-        player.lock().unwrap().update(|uc| {
-            let target = Avm2Object::from(target.fetch(uc));
+        match fetch.await {
+            Ok(mut response) => {
+                let status = response.status();
+                let redirected = response.redirected();
+                let expected_length = response.expected_length().unwrap_or(None).unwrap_or(0) as usize;
 
-            let mut activation = Avm2Activation::from_nothing(uc);
+                let mut data_format_binary = false;
+                let mut buffer = Vec::new();
+                let mut bytes_loaded = 0;
+                let mut current_load_id = 0;
 
-            fn set_data<'a, 'gc: 'a>(
-                body: Vec<u8>,
-                activation: &mut Avm2Activation<'a, 'gc>,
-                target: Avm2Object<'gc>,
-            ) {
-                use crate::avm2::globals::slots::flash_net_url_loader as url_loader_slots;
+                // Initial update: Fire open event, check dataFormat
+                player.lock().unwrap().update(|uc| {
+                    let target = Avm2Object::from(target_handle.fetch(uc));
+                    let mut activation = Avm2Activation::from_nothing(uc);
 
-                let body_len = body.len().into();
+                    // Get current _loadId
+                    let package_name = AvmString::new_utf8(activation.context.gc_context, "flash.net");
+                    let ns = crate::avm2::Namespace::package(
+                        package_name,
+                        crate::avm2::api_version::ApiVersion::VM_INTERNAL,
+                        &mut activation.context.strings,
+                    );
+                    let name_str = AvmString::new_utf8(activation.context.gc_context, "_loadId");
+                    let name = crate::avm2::Multiname::new(ns, name_str);
+                    current_load_id = {
+                        let val: crate::avm2::Value = target.into();
+                        val.get_property(&name, &mut activation)
+                            .and_then(|v| v.coerce_to_i32(&mut activation))
+                            .unwrap_or(0)
+                    };
 
-                // TODO - update these as the download progresses
-                target
-                    .set_slot(url_loader_slots::BYTES_LOADED, body_len, activation)
-                    .unwrap();
-                target
-                    .set_slot(url_loader_slots::BYTES_TOTAL, body_len, activation)
-                    .unwrap();
-
-                let data_format = target
-                    .get_slot(url_loader_slots::DATA_FORMAT)
-                    .coerce_to_string(activation)
-                    .expect("The dataFormat field is typed String");
-
-                let data_object = if &data_format == b"binary" {
-                    let storage = ByteArrayStorage::from_vec(activation.context, body);
-                    let bytearray = ByteArrayObject::from_storage(activation.context, storage);
-
-                    Some(bytearray.into())
-                } else if &data_format == b"variables" {
-                    if body.is_empty() {
-                        None
-                    } else {
-                        let string_value = strip_bom(activation, &body);
-
-                        activation
-                            .avm2()
-                            .classes()
-                            .urlvariables
-                            .construct(activation, &[string_value.into()])
-                            .ok()
-                    }
-                } else {
-                    if &data_format != b"text" {
-                        tracing::warn!("Invalid URLLoaderDataFormat: {}", data_format);
-                    }
-
-                    Some(strip_bom(activation, &body).into())
-                };
-
-                if let Some(data_object) = data_object {
-                    target
-                        .set_slot(url_loader_slots::DATA, data_object, activation)
-                        .unwrap();
-                }
-            }
-
-            match response {
-                Ok((body, _, status, redirected)) => {
-                    let total_len = body.len();
-
-                    // FIXME - the "open" event should be fired earlier, just before
-                    // we start to fetch the data.
-                    // However, the "open" event should not be fired if an IO error
-                    // occurs opening the connection (e.g. if a file does not exist on disk).
-                    // We currently have no way of detecting this, so we settle for firing
-                    // the event after the entire fetch is complete. This causes there
-                    // to a longer delay between the initial load triggered by the script
-                    // and the "load" event firing, but it ensures that we match
-                    // the Flash behavior w.r.t when an event is fired vs not fired.
                     let open_evt = Avm2EventObject::bare_default_event(activation.context, "open");
                     Avm2::dispatch_event(activation.context, open_evt, target);
-                    set_data(body, &mut activation, target);
 
-                    // FIXME - we should fire "progress" events as we receive data, not
-                    // just at the end
-                    let progress_evt = Avm2EventObject::progress_event(
-                        &mut activation,
-                        "progress",
-                        total_len,
-                        total_len,
-                    );
+                    use crate::avm2::globals::slots::flash_net_url_loader as url_loader_slots;
+                    let data_format = target
+                        .get_slot(url_loader_slots::DATA_FORMAT)
+                        .coerce_to_string(&mut activation)
+                        .unwrap_or_else(|_| AvmString::new_utf8(activation.context.gc_context, "text"));
 
-                    Avm2::dispatch_event(activation.context, progress_evt, target);
+                    if *data_format == *b"binary" {
+                        data_format_binary = true;
+                        let storage = ByteArrayStorage::new(activation.context);
+                        let bytearray = ByteArrayObject::from_storage(activation.context, storage);
+                        target.set_slot(url_loader_slots::DATA, bytearray.into(), &mut activation).unwrap();
+                    }
 
                     let http_status_evt =
                         Avm2EventObject::http_status_event(&mut activation, status, redirected);
-
                     Avm2::dispatch_event(activation.context, http_status_evt, target);
 
-                    let complete_evt =
-                        Avm2EventObject::bare_default_event(activation.context, "complete");
-                    Avm2::dispatch_event(uc, complete_evt, target);
+                    Ok::<(), Error>(())
+                })?;
+
+                loop {
+                    let chunk = response.next_chunk().await;
+
+                    match chunk {
+                        Ok(Some(data)) => {
+                            let mut cancelled = false;
+                            player.lock().unwrap().update(|uc| {
+                                let target = Avm2Object::from(target_handle.fetch(uc));
+                                let mut activation = Avm2Activation::from_nothing(uc);
+
+                                // Check cancellation
+                                let package_name = AvmString::new_utf8(activation.context.gc_context, "flash.net");
+                                let ns = crate::avm2::Namespace::package(
+                                    package_name,
+                                    crate::avm2::api_version::ApiVersion::VM_INTERNAL,
+                                    &mut activation.context.strings,
+                                );
+                                let name_str = AvmString::new_utf8(activation.context.gc_context, "_loadId");
+                                let name = crate::avm2::Multiname::new(ns, name_str);
+                        let id = {
+                            let val: crate::avm2::Value = target.into();
+                            val.get_property(&name, &mut activation)
+                                .and_then(|v| v.coerce_to_i32(&mut activation))
+                                .unwrap_or(0)
+                        };
+
+                                if id != current_load_id {
+                                    cancelled = true;
+                                    return Ok(());
+                                }
+
+                                use crate::avm2::globals::slots::flash_net_url_loader as url_loader_slots;
+
+                                bytes_loaded += data.len();
+
+                                if data_format_binary {
+                                    let data_val = target.get_slot(url_loader_slots::DATA);
+                                    if let Some(bytearray) = data_val.as_object().and_then(|o| o.as_bytearray_object()) {
+                                        let mut storage = bytearray.storage_mut();
+                                        let old_pos = storage.position();
+                                        storage.set_position(storage.len());
+                                        storage.write_bytes(&data).unwrap();
+                                        storage.set_position(old_pos);
+                                    }
+                                } else {
+                                    buffer.extend_from_slice(&data);
+                                }
+
+                                target.set_slot(url_loader_slots::BYTES_LOADED, bytes_loaded.into(), &mut activation).unwrap();
+                                target.set_slot(url_loader_slots::BYTES_TOTAL, expected_length.max(bytes_loaded).into(), &mut activation).unwrap();
+
+                                let progress_evt = Avm2EventObject::progress_event(
+                                    &mut activation,
+                                    "progress",
+                                    bytes_loaded,
+                                    expected_length.max(bytes_loaded),
+                                );
+                                Avm2::dispatch_event(activation.context, progress_evt, target);
+
+                                Ok::<(), Error>(())
+                            })?;
+
+                            if cancelled {
+                                break;
+                            }
+                        }
+                        Ok(None) => {
+                            // Finished
+                            player.lock().unwrap().update(|uc| {
+                                let target = Avm2Object::from(target_handle.fetch(uc));
+                                let mut activation = Avm2Activation::from_nothing(uc);
+
+                                // Check cancellation
+                                let package_name = AvmString::new_utf8(activation.context.gc_context, "flash.net");
+                                let ns = crate::avm2::Namespace::package(
+                                    package_name,
+                                    crate::avm2::api_version::ApiVersion::VM_INTERNAL,
+                                    &mut activation.context.strings,
+                                );
+                                let name_str = AvmString::new_utf8(activation.context.gc_context, "_loadId");
+                                let name = crate::avm2::Multiname::new(ns, name_str);
+                                let id = {
+                                    let val: crate::avm2::Value = target.into();
+                                    val.get_property(&name, &mut activation)
+                                        .and_then(|v| v.coerce_to_i32(&mut activation))
+                                        .unwrap_or(0)
+                                };
+
+                                if id != current_load_id {
+                                    return Ok(());
+                                }
+
+                                use crate::avm2::globals::slots::flash_net_url_loader as url_loader_slots;
+
+                                if !data_format_binary {
+                                    let data_format = target
+                                        .get_slot(url_loader_slots::DATA_FORMAT)
+                                        .coerce_to_string(&mut activation)
+                                        .expect("The dataFormat field is typed String");
+
+                                    let data_object = if &data_format == b"variables" {
+                                        if buffer.is_empty() {
+                                            None
+                                        } else {
+                                            let string_value = strip_bom(&mut activation, &buffer);
+                                            activation
+                                                .avm2()
+                                                .classes()
+                                                .urlvariables
+                                                .construct(&mut activation, &[string_value.into()])
+                                                .ok()
+                                        }
+                                    } else {
+                                        if &data_format != b"text" {
+                                            tracing::warn!("Invalid URLLoaderDataFormat: {}", data_format);
+                                        }
+                                        Some(strip_bom(&mut activation, &buffer).into())
+                                    };
+
+                                    if let Some(data_object) = data_object {
+                                        target
+                                            .set_slot(url_loader_slots::DATA, data_object, &mut activation)
+                                            .unwrap();
+                                    }
+                                }
+
+                                let complete_evt =
+                                    Avm2EventObject::bare_default_event(activation.context, "complete");
+                                Avm2::dispatch_event(activation.context, complete_evt, target);
+                                Ok::<(), Error>(())
+                            })?;
+                            break;
+                        }
+                        Err(e) => {
+                            tracing::error!("Error during URLLoader stream: {:?}", e);
+                            player.lock().unwrap().update(|uc| {
+                                let target = Avm2Object::from(target_handle.fetch(uc));
+                                let mut activation = Avm2Activation::from_nothing(uc);
+                                let io_error_evt = Avm2EventObject::io_error_event(
+                                    &mut activation,
+                                    "Error #2032: Stream Error",
+                                    2032,
+                                );
+                                Avm2::dispatch_event(uc, io_error_evt, target);
+                                Ok::<(), Error>(())
+                            })?;
+                            break;
+                        }
+                    }
                 }
-                Err(response) => {
-                    tracing::error!(
-                        "Error during URLLoader load of {:?}: {:?}",
-                        response.url,
-                        response.error
-                    );
-
-                    // Testing with Flash shoes that the 'data' property is cleared
-                    // when an error occurs
-
-                    set_data(Vec::new(), &mut activation, target);
+            }
+            Err(response) => {
+                tracing::error!(
+                    "Error during URLLoader load of {:?}: {:?}",
+                    response.url,
+                    response.error
+                );
+                player.lock().unwrap().update(|uc| -> Result<(), Error> {
+                    let target = Avm2Object::from(target_handle.fetch(uc));
+                    let mut activation = Avm2Activation::from_nothing(uc);
 
                     let (status_code, redirected) =
                         if let Error::HttpNotOk(_, status_code, redirected, _) = response.error {
@@ -1230,7 +1336,6 @@ pub fn load_data_into_url_loader<'gc>(
 
                     Avm2::dispatch_event(activation.context, http_status_evt, target);
 
-                    // FIXME - Match the exact error message generated by Flash
                     let io_error_evt = Avm2EventObject::io_error_event(
                         &mut activation,
                         "Error #2032: Stream Error",
@@ -1238,11 +1343,11 @@ pub fn load_data_into_url_loader<'gc>(
                     );
 
                     Avm2::dispatch_event(uc, io_error_evt, target);
-                }
+                    Ok(())
+                })?;
             }
-
-            Ok(())
-        })
+        }
+        Ok(())
     })
 }
 
