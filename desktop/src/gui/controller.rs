@@ -576,6 +576,9 @@ fn load_system_fonts(
             Family::Name("Source Han Sans"),   // Open font, same as Noto Sans CJK
             Family::Name("WenQuanYi Zen Hei"), // Open font
             Family::Name("Arial Unicode MS"),  // MacOS
+            Family::Name("Microsoft YaHei"),   // Windows
+            Family::Name("SimSun"),            // Windows
+            Family::Name("PingFang SC"),       // MacOS
         ],
     ));
 
